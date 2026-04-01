@@ -21,6 +21,9 @@ import psycopg2.pool
 
 #import siemens plc modules
 import snap7
+from snap7.type import Areas
+
+# from plc_io import read_sensor_real, create_client
 
 """
 Setting basic information
@@ -84,7 +87,8 @@ sensor_id_list = [
     "DMT-02",
     "Chiller-01",
     "Chiller-T",
-    "Chiller-PrevT"
+    "Chiller-PrevT",
+    "System Status"
 ]
 
 # workers initialize
@@ -219,6 +223,64 @@ def read_sensor_real(offset):
         data = plc_client.db_read(DB_NUMBER, offset, 4)
     return snap7.util.get_real(data, 0)
 
+def read_sensor_bool(byte_offset, bit_index):
+    with plc_lock:
+        data = plc_client.db_read(DB_NUMBER, byte_offset, 1)
+        return snap7.util.get_bool(data, 0, bit_index)
+
+def read_m_bool(byte_offset, bit_index):
+    with plc_lock:
+        data = plc_client.read_area(Areas.MK, 0, byte_offset, 1)
+    return snap7.util.get_bool(data, 0, bit_index)
+
+def system_status()->list:
+    '''
+    Reading the current operational status of the chiller. 
+    The function will send out an integer to represent the operation status:
+    1. Standby 
+    2. Countdown - Warming Stage 
+    3. Warming Up 
+    4. Countdown - Cooling Stage 
+    5. Cooling Down.
+    '''
+    status_code = 0
+    status_dict = {
+        0: 'The door is open. Please check the system.',
+        1: 'Statndby',
+        2: 'Countdown-Warming Stage ',
+        3: 'Warming up',
+        4: 'Countdown-Cooling Stage ',
+        5: 'Cooling down'
+    }
+    result = []
+
+    idle_running = read_sensor_bool(540, 0)
+    is_go_cold = read_m_bool(100, 4)
+    is_go_warm = read_m_bool(100, 3)
+    is_door_lock = read_m_bool(60, 0)
+
+    if not is_door_lock:
+        status_code = 0
+        result = [status_code, status_dict[status_code]]
+        return result
+
+    if idle_running:
+        if is_go_warm:
+            status_code = 2
+        elif is_go_cold:
+            status_code = 4
+        else:
+            status_code = 1
+    else:
+        if is_go_warm:
+            status_code = 3
+        else:
+            status_code = 5
+    
+    result = [status_code, status_dict[status_code]]
+    return result
+    
+
 def schedule_job():
     try:
         # temperature
@@ -230,15 +292,23 @@ def schedule_job():
         rtd06 = read_sensor_real(196)
         rtd07 = read_sensor_real(234)
         rtd08 = read_sensor_real(272)
+
+
         # dew point
-        # dmt01 = act_dew_point(read_sensor_real(314))
-        # dmt02 = act_dew_point(read_sensor_real(356))
-        dmt01 = read_sensor_real(314)
-        dmt02 = read_sensor_real(356)
+        dmt01 = act_dew_point(read_sensor_real(314))
+        dmt02 = act_dew_point(read_sensor_real(356))
+        # dmt01 = read_sensor_real(314)
+        # dmt02 = read_sensor_real(356)
+
+
         # chiller temp
         chiller01 = read_sensor_real(410)
         chiller02 = read_sensor_real(418)
         chiller03 = read_sensor_real(422)
+
+        # system status
+        sys_status = system_status()[0]
+        
 
         # Combine the data into a single payload
         data = {
@@ -255,6 +325,7 @@ def schedule_job():
             "Chiller-01":[chiller01, 'temperature_C'],
             "Chiller-T": [chiller02, 'temperature_C'],
             "Chiller-PrevT": [chiller03, 'temperature_C'],
+            "System Status": [sys_status, 'system_C'],
             "measured_at": time.strftime("%Y-%m-%d %H:%M:%S")
         }
         publish_mqtt_batch(data)
