@@ -6,18 +6,7 @@ import yaml
 import os
 import sys
 
-# Loading yaml configuration file
-def load_config(config_path:str)->None:
-    if not os.path.exists(config_path):
-        print(f"Error, there is no configuration file: '{config_path}'")
-        sys.exit(1)
-    
-    with open(config_path, 'r', encoding='utf-8') as f:
-        try:
-            return yaml.safe_load(f)
-        except yaml.YAMLError as exc:
-            print(f"Error: {exc}")
-            sys.exit(1)
+from plc_io import load_config, create_client, read_sensor_real, read_sensor_bool, write_temp_setpoint, write_int_value, system_status
 
 def parse_args():
     parser = argparse.ArgumentParser(description='PLC Thermal Cycle Controller')
@@ -25,29 +14,6 @@ def parse_args():
     parser.add_argument('-f', '--force-run', action='store_true', help='Override yaml dry_run setting to execute immediately')
     parser.add_argument('-s', '--stop', action='store_true', help='Send STOP signal to the PLC immediately')
     return parser.parse_args()
-
-def create_client(plc_config):
-    client = snap7.client.Client()
-    try:
-        client.connect(plc_config['ip'], plc_config['rack'], plc_config['slot'])
-        return client
-    except Exception as e:
-        print(f"PLC connection failed: {e}")
-        return None
-
-def read_sensor_real(client, db_number, offset):
-    data = client.db_read(db_number, offset, 4) # real occupied 4 bytes
-    return snap7.util.get_real(data, 0)
-
-def write_temp_setpoint(client, db_number, offset, value):
-    data = bytearray(4) 
-    set_real(data, 0, value)
-    client.db_write(db_number, offset, data)
-
-def write_int_value(client, db_number, offset, value):
-    data = bytearray(2)
-    set_int(data, 0, value)
-    client.db_write(db_number, offset, data)
 
 def press_hmi_button(client, db_number, byte_offset, bit_index, button_name):
     # 1. Reading current status
@@ -95,6 +61,7 @@ def smart_start(client, db_number):
 def main():
     args = parse_args()
     cfg = load_config(args.config)
+    print(f"Loading config file:{args.config}")
     
     plc_cfg = cfg['plc']
     exp_cfg = cfg['experiment']
@@ -130,7 +97,6 @@ def main():
         if args.stop:
             print("Sending STOP signal to PLC...")
 
-            # Execution
             while retry_count <= max_retries and not is_stop:
                 print(f"=== Sending STOP command, no of retry:{retry_count}===\n")
                 press_hmi_button(client, db_num, 556, 2, "STOP")
@@ -148,24 +114,25 @@ def main():
                 print("Reach retry number limit, system can not be stopped. Please stop the system manually.")
 
         while retry_count <= max_retries and not is_success:
-            print(f"=== Sending command, no of retry:{retry_count}===\n")
-
-            # Writing.
-            write_temp_setpoint(client, db_num, 468, exp_cfg['temp_low'])
-            write_temp_setpoint(client, db_num, 472, exp_cfg['temp_high'])
-            write_int_value(client, db_num, 548, exp_cfg['cycles'])
-            write_int_value(client, db_num, 536, exp_cfg['idle_cold_min'])
-            write_int_value(client, db_num, 538, exp_cfg['idle_warm_min'])
-
             # Execution
             if not is_dry_run:
+
+                print(f"=== Sending command, no of retry:{retry_count}===\n")
+                # Writing.
+                write_temp_setpoint(client, db_num, 468, exp_cfg['temp_low'])
+                write_temp_setpoint(client, db_num, 472, exp_cfg['temp_high'])
+                write_int_value(client, db_num, 548, exp_cfg['cycles'])
+                write_int_value(client, db_num, 536, exp_cfg['idle_cold_min'])
+                write_int_value(client, db_num, 538, exp_cfg['idle_warm_min'])
+
                 print("Proceeding thermal cycle...")
                 smart_start(client, db_num)
                 time.sleep(2.0)
                 current_target = read_sensor_real(client, db_num, 418)
-                print(f"current_target: {current_target}")
-                print(f"low_temp_limit: {low_temp_target}")
-                if abs(current_target) - abs(low_temp_target) < 0.01:
+                print(f"Current Target Temperature: {current_target}℃")
+                print(f"Target Temperature: {low_temp_target}℃")
+                print(f"Difference: {abs(current_target - low_temp_target)}")
+                if abs(current_target - low_temp_target) < 0.01:
                     print("New setting is loaded.")
                     is_success = True
                 else:
@@ -173,15 +140,20 @@ def main():
                     retry_count += 1
                     time.sleep(1.0)
             else:
+                System_status = system_status(client)
                 print('Simulation mode: Check bypassed.')
                 is_success = True
+                print(f"Current Status:{System_status[1]}, Status Code:{System_status[0]}")
+                
         if not is_success:
             print("Reach maximum retry number, please check the PLC status.")
     except Exception as e:
         print(f"Error Occur: {e}")
     finally:
         client.disconnect()
-        print('PLC is disconnected.')
+        print('=========================\n')
+        print('Process complete.')
+        print('PLC now is disconnected.')
 
 if __name__ == "__main__":
     main()
