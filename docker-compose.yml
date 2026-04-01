@@ -14,12 +14,13 @@ services:
   
   # Database
   db:
-    image: postgres
+    image: postgres:16
     container_name: tidc_b205_postgres
     restart: always
     shm_size: 128mb
     volumes:
       - tidc_b205_db:/var/lib/postgresql/data
+      - ./local_database/sql:/docker-entrypoint-initdb.d
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
