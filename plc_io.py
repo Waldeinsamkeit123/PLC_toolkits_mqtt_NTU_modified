@@ -103,10 +103,12 @@ def system_status(client)->list:
         else:
             status_code = 1
     else:
-        if is_go_warm:
+        if is_go_warm and not is_go_cold:
             status_code = 3
-        else:
+        elif is_go_cold and not is_go_warm:
             status_code = 5
+        else:
+            status_code = 1
     
     result = [status_code, status_dict[status_code]]
     return result
