@@ -1,5 +1,8 @@
-.venv/
+config.ini
+*.env
+*.auth
+
 __pycache__/
-.env
-*.bak
-mosquitto
+.python-version
+
+backup_code/

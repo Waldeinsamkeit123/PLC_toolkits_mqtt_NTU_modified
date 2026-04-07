@@ -272,10 +272,12 @@ def system_status()->list:
         else:
             status_code = 1
     else:
-        if is_go_warm:
+        if is_go_warm and not is_go_cold:
             status_code = 3
-        else:
+        elif is_go_cold and not is_go_warm:
             status_code = 5
+        else:
+            status_code = 1
     
     result = [status_code, status_dict[status_code]]
     return result
@@ -341,7 +343,8 @@ def main():
 
     # Schedule the job with 20 seconds interval
     schedule.every().minute.at(":00").do(run_threaded, schedule_job)
-    schedule.every().minute.at(":30").do(run_threaded, schedule_job)
+    schedule.every().minute.at(":20").do(run_threaded, schedule_job)
+    schedule.every().minute.at(":40").do(run_threaded, schedule_job)
 
     # Set up the MQTT client
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
